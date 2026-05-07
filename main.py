@@ -1,13 +1,13 @@
-from fastapi import FastAPI, Request, Response, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 import os
-import httpx
-import uvicorn
+import time
+import httpx # മെറ്റാ എപിഐയിലേക്ക് അയക്കാൻ ഇത് ആവശ്യമാണ്
+from fastapi import FastAPI, Request
+from supabase import create_client, Client
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# --- 1. CORS സെറ്റപ്പ് ---
-# ഇത് നൽകിയാലേ നിങ്ങളുടെ HTML ഫയലിന് Render-ലേക്ക് ഡാറ്റ അയക്കാൻ അനുവാദം ലഭിക്കൂ
+# CORS സെറ്റിംഗ്സ്
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,81 +16,50 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- 2. താൽക്കാലിക ഡാറ്റാബേസ് (List) ---
-# സർവർ റൺ ചെയ്യുന്ന സമയം വരെ ഈ ലിസ്റ്റിൽ മെസ്സേജുകൾ സേവ് ആകും
-db_messages = []
+# സുപ്പബേസ് കണക്ഷൻ
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
 
-# --- 3. നിങ്ങളുടെ ക്രെഡൻഷ്യൽസ് ---
-ACCESS_TOKEN = "EAAZCDxF91sjgBRWEpOGhN3LCvALjzaYVfE973mgaSaVKdDngJSpnqwkgqYJsBJLvdpS8PkdNB0y5TMe10tXZCOfktZCglraHr6EWziegYswhZBV4sB5pAeuycAzzVkJZAXfX6mzMWz2wjLnLTnh4sZChnpH7WPEZCZCscSrC6YCeQB2CBTaghYWcwshY0HfF6jsZAasUSFNrRTTpdpPoMMJCN09p3uNKpbRu7PWjSxgalbJgDbZABFHLg9lu66z9zVH14R9oE5ZAWzZAnmpgnaXf3B0dj9DHL8maA44vLmmGMxYZD"
-PHONE_NUMBER_ID = "1104892906043582"
-VERIFY_TOKEN = "hafiz_test_token_123"
+# മെറ്റാ വാട്സ്ആപ്പ് ക്രെഡൻഷ്യൽസ് (Render Env-ൽ സെറ്റ് ചെയ്യുക)
+ACCESS_TOKEN = os.environ.get("WHATSAPP_TOKEN")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
 
 @app.get("/")
-async def root():
-    return {"message": "Hafiz's Real-Time WhatsApp API is Live!"}
+def home():
+    return {"message": "WhatsApp API is Live with Supabase!"}
 
-# --- 4. വെബ്ഹുക്ക് വെരിഫിക്കേഷൻ ---
-@app.get("/webhook")
-async def verify(request: Request):
-    params = request.query_params
-    mode = params.get("hub.mode")
-    token = params.get("hub.verify_token")
-    challenge = params.get("hub.challenge")
-
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        return Response(content=challenge, media_type="text/plain")
-    return Response(status_code=403)
-
-# --- 5. മെസ്സേജുകൾ സ്വീകരിക്കുകയും സേവ് ചെയ്യുകയും ചെയ്യുന്നു ---
+# --- WEBHOOK: ഇൻകമിംഗ് മെസ്സേജുകൾ സ്വീകരിക്കാൻ ---
 @app.post("/webhook")
 async def handle_messages(request: Request):
     body = await request.json()
-    
-    # Render ലോഗ്സിൽ മെസ്സേജ് പ്രിന്റ് ചെയ്യുന്നു
-    print("📩 Incoming WhatsApp JSON:", body)
-
     try:
-        if 'entry' in body and 'changes' in body['entry'][0]:
-            value = body['entry'][0]['changes'][0]['value']
+        if 'entry' in body:
+            entry = body['entry'][0]
+            restaurant_id = entry['id'] 
+            changes = entry['changes'][0]['value']
             
-            # മെസ്സേജ് ഉണ്ടോ എന്ന് നോക്കുന്നു
-            if 'messages' in value:
-                msg_data = value['messages'][0]
+            if 'messages' in changes:
+                msg = changes['messages'][0]
                 
-                # നമുക്ക് ആവശ്യമായ വിവരങ്ങൾ മാത്രം എടുക്കുന്നു
-                new_entry = {
-                    "restaurantId": body['entry'][0]['id'], # Meta Business Account ID
-                    "customerNumber": msg_data['from'],
-                    "messageType": msg_data['type'],
-                    "messageContent": msg_data,
-                    "timestamp": msg_data['timestamp']
+                # സുപ്പബേസിലേക്ക് ഇൻകമിംഗ് മെസ്സേജ് സേവ് ചെയ്യുന്നു
+                data = {
+                    "restaurant_id": restaurant_id,
+                    "customer_number": msg['from'],
+                    "message_text": msg['text']['body'],
+                    "is_outgoing": False
                 }
-                
-                # ലിസ്റ്റിലേക്ക് സേവ് ചെയ്യുന്നു
-                db_messages.append(new_entry)
-                print(f"✅ Saved message from {msg_data['from']}")
-
+                supabase.table("messages").insert(data).execute()
+                print(f"✅ Incoming Saved: {msg['from']}")
     except Exception as e:
-        print(f"❌ Error processing message: {e}")
-
+        print(f"❌ Webhook Error: {e}")
     return {"status": "ok"}
 
-# --- 6. ഡാഷ്‌ബോർഡിന് ഡാറ്റ നൽകാനുള്ള എൻഡ്‌പോയിന്റ് ---
-# ഇത് ഉപയോഗിച്ചാണ് HTML ഫയൽ മെസ്സേജുകൾ എടുക്കുന്നത്
-@app.get("/api/messages")
-async def get_messages(restaurantId: str):
-    # റെസ്റ്റോറന്റ് ഐഡി വെച്ച് ഫിൽറ്റർ ചെയ്യുന്നു
-    filtered_messages = [m for m in db_messages if m['restaurantId'] == restaurantId]
-    return {"data": filtered_messages}
-
-# --- 7. മെസ്സേജ് അയക്കാനുള്ള എൻഡ്‌പോയിന്റ് ---
+# --- SEND: മെസ്സേജുകൾ അയക്കാൻ ---
 @app.post("/send")
-async def send_whatsapp_message(to_number: str, message_text: str):
-    url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {ACCESS_TOKEN}",
-        "Content-Type": "application/json"
-    }
+async def send_message(to_number: str, message_text: str, restaurant_id: str = "916110261462021"):
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
     payload = {
         "messaging_product": "whatsapp",
         "to": to_number,
@@ -99,9 +68,28 @@ async def send_whatsapp_message(to_number: str, message_text: str):
     }
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(url, headers=headers, json=payload)
-        return response.json()
+        response = await client.post(url, json=payload, headers=headers)
+        
+        if response.status_code == 200:
+            # അയച്ച മെസ്സേജും ഹിസ്റ്ററിക്ക് വേണ്ടി സുപ്പബേസിൽ സേവ് ചെയ്യുന്നു
+            data = {
+                "restaurant_id": restaurant_id,
+                "customer_number": to_number,
+                "message_text": message_text,
+                "is_outgoing": True # നമ്മൾ അയച്ചതുകൊണ്ട് True
+            }
+            supabase.table("messages").insert(data).execute()
+            return {"status": "success", "data": response.json()}
+        
+    return {"status": "error", "message": response.text}
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+# --- GET: മെസ്സേജ് ഹിസ്റ്ററി എടുക്കാൻ ---
+@app.get("/api/messages")
+async def get_messages(restaurantId: str):
+    # പഴയ മെസ്സേജുകൾ ആദ്യം വരുന്ന രീതിയിൽ സെലക്ട് ചെയ്യുന്നു (Order by created_at)
+    response = supabase.table("messages")\
+        .select("*")\
+        .eq("restaurant_id", restaurantId)\
+        .order("created_at", desc=False)\
+        .execute()
+    return {"data": response.data}

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Restaurant ERP - WhatsApp</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #d1d7db; display: flex; flex-direction: column; align-items: center; height: 100vh; }
+        
+        /* New Top Bar for Testing Multi-Tenant */
+        .top-bar { width: 90vw; max-width: 1200px; background-color: #202c33; color: white; padding: 10px; display: flex; gap: 10px; align-items: center; border-radius: 8px 8px 0 0; margin-top: 20px; }
+        .top-bar button { padding: 8px 15px; cursor: pointer; font-weight: bold; border-radius: 5px; border: none; }
+        .btn-active { background-color: #00a884; color: white; }
+        .btn-inactive { background-color: #3b4a54; color: white; }
+
+        /* Main App Container */
+        .app-container { width: 90vw; height: 80vh; max-width: 1200px; background-color: #ffffff; display: flex; box-shadow: 0 6px 18px rgba(0,0,0,0.1); border-radius: 0 0 8px 8px; overflow: hidden; }
+        
+        /* Sidebar & Chat Area (Same as before) */
+        .sidebar { width: 35%; border-right: 1px solid #e9edef; display: flex; flex-direction: column; background-color: #ffffff; }
+        .header { background-color: #f0f2f5; padding: 15px 20px; font-weight: bold; color: #41525d; border-bottom: 1px solid #e9edef; font-size: 1.1em; display: flex; align-items: center; height: 60px; box-sizing: border-box; }
+        .contact-list { flex-grow: 1; overflow-y: auto; }
+        .contact-item { display: flex; padding: 12px 15px; border-bottom: 1px solid #f2f2f2; cursor: pointer; align-items: center; }
+        .contact-item.active { background-color: #f0f2f5; }
+        .avatar { width: 45px; height: 45px; background-color: #dfe5e7; border-radius: 50%; margin-right: 15px; display: flex; justify-content: center; align-items: center; font-size: 1.2em; }
+        .contact-info { flex-grow: 1; overflow: hidden; }
+        .contact-name { font-weight: bold; color: #111b21; margin-bottom: 3px; }
+        .contact-preview { font-size: 0.85em; color: #667781; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        .chat-area { width: 65%; display: flex; flex-direction: column; background-color: #efeae2; position: relative; }
+        .chat-feed { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+        .empty-state { display: flex; justify-content: center; align-items: center; height: 100%; color: #667781; text-align: center; flex-direction: column; }
+        .bubble { max-width: 75%; padding: 8px 12px; border-radius: 8px; font-size: 0.95em; line-height: 1.4; box-shadow: 0 1px 1px rgba(0,0,0,0.1); margin-bottom: 5px; }
+        .bubble.incoming { background-color: #ffffff; align-self: flex-start; border-top-left-radius: 0; }
+        .bubble.outgoing { background-color: #dcf8c6; align-self: flex-end; border-top-right-radius: 0; }
+        .bubble-time { font-size: 0.7em; color: #888; text-align: right; margin-top: 4px; display: block; }
+        
+        .reply-bar { background-color: #f0f2f5; padding: 15px; display: flex; gap: 10px; align-items: center; }
+        .reply-bar input { flex-grow: 1; padding: 12px 20px; border: none; border-radius: 24px; font-size: 1em; outline: none; }
+        .btn-send { background-color: #00a884; color: white; border: none; padding: 12px 24px; border-radius: 24px; cursor: pointer; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <!-- TEST CONTROLS -->
+    <div class="top-bar">
+        <span>🔄 Test Multi-Tenant Logic:</span>
+        <button id="btn-rest1" class="btn-active" onclick="switchRestaurant('6883b8b93f55d11dfbf630de', 'btn-rest1')">Login as Your Restaurant</button>
+        <button id="btn-rest2" class="btn-inactive" onclick="switchRestaurant('9999fakeid9999', 'btn-rest2')">Login as KFC (Fake ID)</button>
+    </div>
+
+    <div class="app-container">
+        <!-- LEFT SIDEBAR -->
+        <div class="sidebar">
+            <div class="header" id="sidebar-header">💬 Inbox</div>
+            <div class="contact-list" id="contact-list">
+                <div style="padding: 20px; text-align: center; color: #888;">Loading chats...</div>
+            </div>
+        </div>
+
+        <!-- RIGHT CHAT AREA -->
+        <div class="chat-area">
+            <div class="header" id="chat-header">Select a customer to start chatting</div>
+            <div class="chat-feed" id="chat-feed">
+                <div class="empty-state">
+                    <h2>Restaurant ERP WhatsApp</h2>
+                    <p>Click on a customer in the sidebar to view their messages.</p>
+                </div>
+            </div>
+            <div class="reply-bar">
+                <input type="text" id="chat-input" placeholder="Type a message..." disabled>
+                <button class="btn-send" id="send-btn" disabled>Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const BASE_URL = "https://tym-whatsapp-backend.onrender.com";
+        
+        // നമ്മൾ ഇതിനെ 'let' ആക്കി മാറ്റി, കാരണം ബട്ടൺ ക്ലിക്ക് ചെയ്യുമ്പോൾ ഇത് മാറണം
+        let CURRENT_RESTAURANT_ID = "6883b8b93f55d11dfbf630de"; 
+        
+        let allMessagesData = [];
+        let activeCustomer = null;
+
+        // --- THE SWITCH FUNCTION ---
+        function switchRestaurant(newId, buttonId) {
+            CURRENT_RESTAURANT_ID = newId;
+            activeCustomer = null; // പഴയ കസ്റ്റമർ സെലക്ഷൻ കളയുന്നു
+            
+            // ബട്ടൺ കളർ മാറ്റാൻ
+            document.getElementById('btn-rest1').className = 'btn-inactive';
+            document.getElementById('btn-rest2').className = 'btn-inactive';
+            document.getElementById(buttonId).className = 'btn-active';
+
+            // UI ക്ലിയർ ചെയ്യുന്നു
+            document.getElementById('contact-list').innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">Loading new restaurant data...</div>';
+            document.getElementById('chat-feed').innerHTML = '<div class="empty-state"><h2>Restaurant Switched</h2><p>Loading messages...</p></div>';
+            document.getElementById('chat-header').innerText = 'Select a customer to start chatting';
+            document.getElementById('chat-input').disabled = true;
+            document.getElementById('send-btn').disabled = true;
+
+            // പുതിയ ID വെച്ച് ഡാറ്റ എടുക്കുന്നു
+            fetchMessages();
+        }
+
+        async function fetchMessages() {
+            try {
+                // പുതിയ CURRENT_RESTAURANT_ID വെച്ചാണ് ഇപ്പോൾ API വിളിക്കുന്നത്!
+                const response = await fetch(`${BASE_URL}/api/messages?restaurantId=${CURRENT_RESTAURANT_ID}`);
+                const apiResponse = await response.json();
+                
+                allMessagesData = apiResponse.data || []; 
+                
+                renderSidebar();
+                if (activeCustomer) renderChatFeed(activeCustomer);
+            } catch (error) {
+                console.log("Error fetching messages:", error);
+            }
+        }
+
+        // --- ബാക്കി കോഡുകൾ പഴയത് പോലെ തന്നെ (Extract Text, Render Sidebar, Render Chat) ---
+        function extractMessageText(msg) {
+            try {
+                const type = msg.messageType;
+                if (type === 'text') {
+                    if (msg.messageContent?.body) return msg.messageContent.body;
+                    if (msg.messageContent?.text?.body) return msg.messageContent.text.body;
+                    return "Text content missing";
+                }
+                if (type === 'interactive') {
+                    if (msg.messageContent?.interactive?.button_reply) return `[Button] ${msg.messageContent.interactive.button_reply.title}`;
+                    if (msg.messageContent?.interactive?.list_reply) return `[Menu] ${msg.messageContent.interactive.list_reply.title}`;
+                }
+                if (type === 'location') return `📍 [Shared Location]`;
+                return "Unknown message type";
+            } catch (error) {
+                return "Message error";
+            }
+        }
+
+        function renderSidebar() {
+            const groupedChats = {};
+            allMessagesData.forEach(msg => {
+                const phone = msg.customerNumber;
+                if (!groupedChats[phone]) groupedChats[phone] = [];
+                groupedChats[phone].push(msg);
+            });
+
+            const contacts = Object.keys(groupedChats).map(phone => {
+                const msgs = groupedChats[phone];
+                msgs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)); 
+                return { phone: phone, latestMsg: msgs[msgs.length - 1] };
+            });
+
+            contacts.sort((a, b) => new Date(b.latestMsg.timestamp) - new Date(a.latestMsg.timestamp));
+
+            const contactListDiv = document.getElementById('contact-list');
+            contactListDiv.innerHTML = '';
+
+            if (contacts.length === 0) {
+                contactListDiv.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No messages found for this restaurant.</div>';
+                return;
+            }
+
+            contacts.forEach(contact => {
+                const previewText = extractMessageText(contact.latestMsg);
+                const isActive = activeCustomer === contact.phone ? 'active' : '';
+
+                const contactEl = document.createElement('div');
+                contactEl.className = `contact-item ${isActive}`;
+                contactEl.onclick = () => selectCustomer(contact.phone);
+                
+                contactEl.innerHTML = `
+                    <div class="avatar">👤</div>
+                    <div class="contact-info">
+                        <div class="contact-name">+${contact.phone}</div>
+                        <div class="contact-preview">${previewText}</div>
+                    </div>
+                `;
+                contactListDiv.appendChild(contactEl);
+            });
+        }
+
+        function selectCustomer(phone) {
+            activeCustomer = phone;
+            document.getElementById('chat-header').innerText = `Chatting with: +${phone}`;
+            document.getElementById('chat-input').disabled = false;
+            document.getElementById('send-btn').disabled = false;
+            renderSidebar(); 
+            renderChatFeed(phone);
+        }
+
+        function renderChatFeed(phone) {
+            const feed = document.getElementById('chat-feed');
+            feed.innerHTML = '';
+
+            let customerMsgs = allMessagesData.filter(msg => msg.customerNumber === phone);
+            customerMsgs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+            const uniqueMsgs = [];
+            const seenWamids = new Set();
+
+            customerMsgs.forEach(msg => {
+                const wamid = msg.messageContent?.id; 
+                if (wamid) {
+                    if (seenWamids.has(wamid)) return; 
+                    seenWamids.add(wamid);
+                }
+                uniqueMsgs.push(msg); 
+            });
+
+            uniqueMsgs.forEach(msg => {
+                const text = extractMessageText(msg);
+                const time = new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                let bubbleClass = 'bubble incoming'; 
+                if (msg.messageContent && msg.messageContent.body) {
+                    bubbleClass = 'bubble outgoing';
+                }
+                const bubble = document.createElement('div');
+                bubble.className = bubbleClass; 
+                bubble.innerHTML = `<div>${text}</div><span class="bubble-time">${time}</span>`;
+                feed.appendChild(bubble);
+            });
+            feed.scrollTop = feed.scrollHeight;
+        }
+
+        fetchMessages();
+    </script>
+</body>
+</html>

@@ -5,11 +5,18 @@ from fastapi import FastAPI, Request
 from supabase import create_client, Client
 from fastapi.middleware.cors import CORSMiddleware
 
-# ലോക്സിൽ വിവരങ്ങൾ കാണാൻ വേണ്ടി
+# ലോക്സ് സെറ്റ് ചെയ്യുന്നു
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# --- പ്രോക്സി എറർ ഒഴിവാക്കാൻ ഇത് ചേർക്കുക ---
+# Render നൽകുന്ന proxy സെറ്റിംഗ്സ് സുപ്പബേസ് കണക്ഷനെ ബാധിക്കാതിരിക്കാൻ ഇത് സഹായിക്കും
+os.environ.pop("http_proxy", None)
+os.environ.get("https_proxy", None)
+os.environ.pop("HTTP_PROXY", None)
+os.environ.pop("HTTPS_PROXY", None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,22 +26,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- സുപ്പബേസ് കണക്ഷൻ പരിശോധന ---
+# സുപ്പബേസ് കണക്ഷൻ
 logger.info("🚀 Starting Supabase Initialization...")
 url: str = os.environ.get("SUPABASE_URL")
 key: str = os.environ.get("SUPABASE_KEY")
 
-if not url or not key:
-    logger.error("❌ ERROR: SUPABASE_URL or SUPABASE_KEY is missing in Render Environment!")
-    # ഇവിടെ ആപ്പ് ക്രാഷ് ആകാതിരിക്കാൻ തൽക്കാലം ഒരു ഡമ്മി വാല്യൂ നൽകാം (അല്ലെങ്കിൽ ഇത് എറർ കാണിക്കും)
+try:
+    # ഇവിടെ നമ്മൾ സിമ്പിൾ ആയി കണക്ട് ചെയ്യുന്നു
+    supabase: Client = create_client(url, key)
+    logger.info("✅ Supabase Client initialized successfully!")
+except Exception as e:
+    logger.error(f"❌ Supabase Connection Error: {e}")
     supabase = None
-else:
-    try:
-        supabase: Client = create_client(url, key)
-        logger.info("✅ Supabase Client initialized successfully!")
-    except Exception as e:
-        logger.error(f"❌ Supabase Connection Error: {e}")
-        supabase = None
+
+# ... ബാക്കി പഴയ Webhook, Send, Get കോഡുകൾ മാറ്റമില്ലാതെ തുടരാം ...
 
 @app.get("/")
 def home():

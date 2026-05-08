@@ -1,12 +1,16 @@
 import os
 import httpx
+import logging
 from fastapi import FastAPI, Request
 from supabase import create_client, Client
 from fastapi.middleware.cors import CORSMiddleware
 
+# ലോക്സിൽ വിവരങ്ങൾ കാണാൻ വേണ്ടി
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = FastAPI()
 
-# CORS സെറ്റിംഗ്സ്
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,29 +19,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# സുപ്പബേസ് കണക്ഷൻ (ഇത് മാറ്റരുത്)
+# --- സുപ്പബേസ് കണക്ഷൻ പരിശോധന ---
+logger.info("🚀 Starting Supabase Initialization...")
 url: str = os.environ.get("SUPABASE_URL")
 key: str = os.environ.get("SUPABASE_KEY")
-supabase: Client = create_client(url, key)
+
+if not url or not key:
+    logger.error("❌ ERROR: SUPABASE_URL or SUPABASE_KEY is missing in Render Environment!")
+    # ഇവിടെ ആപ്പ് ക്രാഷ് ആകാതിരിക്കാൻ തൽക്കാലം ഒരു ഡമ്മി വാല്യൂ നൽകാം (അല്ലെങ്കിൽ ഇത് എറർ കാണിക്കും)
+    supabase = None
+else:
+    try:
+        supabase: Client = create_client(url, key)
+        logger.info("✅ Supabase Client initialized successfully!")
+    except Exception as e:
+        logger.error(f"❌ Supabase Connection Error: {e}")
+        supabase = None
 
 @app.get("/")
 def home():
     return {"message": "Multi-Restaurant WhatsApp ERP is Live!"}
 
-# --- WEBHOOK: ഇൻകമിംഗ് മെസ്സേജുകൾ സ്വീകരിക്കാൻ ---
+# --- WEBHOOK ---
 @app.post("/webhook")
 async def handle_messages(request: Request):
+    if not supabase:
+        return {"status": "error", "message": "Database not connected"}
+    
     body = await request.json()
     try:
         if 'entry' in body:
             entry = body['entry'][0]
-            restaurant_id = entry['id'] # Meta നൽകുന്ന ബിസിനസ് ഐഡി
+            restaurant_id = entry['id'] 
             changes = entry['changes'][0]['value']
             
             if 'messages' in changes:
                 msg = changes['messages'][0]
                 
-                # സുപ്പബേസിലേക്ക് ഇൻകമിംഗ് മെസ്സേജ് സേവ് ചെയ്യുന്നു
                 data = {
                     "restaurant_id": str(restaurant_id),
                     "customer_number": msg['from'],
@@ -45,16 +63,18 @@ async def handle_messages(request: Request):
                     "is_outgoing": False
                 }
                 supabase.table("messages").insert(data).execute()
-                print(f"✅ Message received for Restaurant {restaurant_id}")
+                logger.info(f"✅ Message received for Restaurant {restaurant_id}")
     except Exception as e:
-        print(f"❌ Webhook Error: {e}")
+        logger.error(f"❌ Webhook Error: {e}")
     return {"status": "ok"}
 
-# --- SEND: മെസ്സേജുകൾ അയക്കാൻ (Multi-Token Support) ---
+# --- SEND ---
 @app.post("/send")
 async def send_message(to_number: str, message_text: str, restaurant_id: str):
+    if not supabase:
+        return {"status": "error", "message": "Database not connected"}
+        
     try:
-        # 1. സുപ്പബേസിലെ 'restaurants' ടേബിളിൽ നിന്ന് ടോക്കൺ എടുക്കുന്നു
         res = supabase.table("restaurants").select("*").eq("id", restaurant_id).single().execute()
         
         if not res.data:
@@ -63,7 +83,6 @@ async def send_message(to_number: str, message_text: str, restaurant_id: str):
         token = res.data['whatsapp_token']
         phone_id = res.data['phone_number_id']
 
-        # 2. Meta API വഴി മെസ്സേജ് അയക്കുന്നു
         meta_url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
         headers = {
             "Authorization": f"Bearer {token}",
@@ -80,7 +99,6 @@ async def send_message(to_number: str, message_text: str, restaurant_id: str):
             response = await client.post(meta_url, json=payload, headers=headers)
             
             if response.status_code == 200:
-                # 3. അയച്ച മെസ്സേജും ഹിസ്റ്ററിയിലേക്ക് സേവ് ചെയ്യുന്നു
                 data = {
                     "restaurant_id": restaurant_id,
                     "customer_number": to_number,
@@ -95,9 +113,12 @@ async def send_message(to_number: str, message_text: str, restaurant_id: str):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# --- GET: മെസ്സേജ് ഹിസ്റ്ററി എടുക്കാൻ ---
+# --- GET MESSAGES ---
 @app.get("/api/messages")
 async def get_messages(restaurantId: str):
+    if not supabase:
+        return {"data": []}
+        
     response = supabase.table("messages")\
         .select("*")\
         .eq("restaurant_id", restaurantId)\

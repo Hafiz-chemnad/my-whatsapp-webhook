@@ -1,4 +1,9 @@
 import os
+# ⚠️ Render-ലെ proxy സെറ്റിംഗ്സ് സുപ്പബേസ് കണക്ഷനെ ബാധിക്കാതിരിക്കാൻ ഇത് നിർബന്ധമായും ചേർക്കുക
+os.environ.pop("http_proxy", None)
+os.environ.pop("https_proxy", None)
+os.environ.pop("HTTP_PROXY", None)
+os.environ.pop("HTTPS_PROXY", None)
 import httpx
 import logging
 from fastapi import FastAPI, Request
@@ -11,11 +16,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# ⚠️ Render-ലെ proxy സെറ്റിംഗ്സ് സുപ്പബേസ് കണക്ഷനെ ബാധിക്കാതിരിക്കാൻ ഇത് നിർബന്ധമായും ചേർക്കുക
-os.environ.pop("http_proxy", None)
-os.environ.pop("https_proxy", None)
-os.environ.pop("HTTP_PROXY", None)
-os.environ.pop("HTTPS_PROXY", None)
+
 
 # CORS സെറ്റിംഗ്സ് - ഫ്ലട്ടർ വെബ് ആപ്പിൽ നിന്ന് കണക്ട് ചെയ്യാൻ ഇത് ആവശ്യമാണ്
 app.add_middleware(
